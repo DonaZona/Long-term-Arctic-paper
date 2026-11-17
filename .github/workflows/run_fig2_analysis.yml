@@ -1,0 +1,43 @@
+name: Run Figure 2 temporal analysis
+
+on:
+  push:
+    paths:
+      - "R_script_Fig.2_temporal_analysis_DZ_v3.R"
+      - "TOT_MET_FLX_v2026_11_13_f*.csv"
+  workflow_dispatch:
+
+jobs:
+  run-fig2-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+
+      - name: Install required R package
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: any::ggplot2
+
+      - name: Show input files
+        run: |
+          echo "Repository files:"
+          find . -maxdepth 2 -type f | sort
+
+      - name: Run Figure 2 script
+        env:
+          NEE_DATA_FILE: TOT_MET_FLX_v2026_11_13_f.csv
+        run: |
+          Rscript R_script_Fig.2_temporal_analysis_DZ_v3.R
+
+      - name: Upload Figure 2 and statistics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Figure-2-analysis-results
+          path: Temporal_analysis_Fig.2/
+          if-no-files-found: warn
