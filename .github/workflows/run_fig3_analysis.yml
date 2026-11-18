@@ -1,0 +1,46 @@
+name: Run Figure 3 analysis
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "R_script_Fig3_NEE_driver_correlations.R"
+      - "TOT_MET_FLX_v2026_11_13_f.csv"
+
+jobs:
+  run-fig3-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+
+      - name: Install R packages
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::ggplot2
+            any::dplyr
+            any::tidyr
+            any::readr
+            any::gridExtra
+
+      - name: Run Figure 3 script
+        env:
+          NEE_DATA_FILE: TOT_MET_FLX_v2026_11_13_f.csv
+        run: |
+          Rscript R_script_Fig3_NEE_driver_correlations.R
+
+      - name: Upload Figure 3 outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Figure-3-analysis-results
+          path: |
+            **/*Fig*3*.png
+            **/*Fig*3*.csv
+            **/*correlation*.csv
+          if-no-files-found: warn
