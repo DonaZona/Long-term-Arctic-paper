@@ -2,9 +2,28 @@
 # with the original units
 # to generate Fig. S3
 
+
+#to load the file to run on R studio
 data_file <- "C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB/TOT_MET_FLX_v2026_11_13_f.csv"
 out_dir <- "C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB"
 
+#to load the file to run on Github
+data_file <- Sys.getenv("NEE_DATA_FILE",
+                        unset = "TOT_MET_FLX_v2026_11_13_f.csv")
+out_dir <- Sys.getenv("NEE_OUTPUT_DIR", unset = getwd())
+
+if (!file.exists(data_file)) {
+  stop("Input CSV not found: ", data_file,
+       "\nPlace the CSV beside this script or set NEE_DATA_FILE.")
+}
+
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+dat <- read.csv(data_file, check.names = FALSE, stringsAsFactors = FALSE,
+                na.strings = c("", "NA", "NaN"))
+dat$Year <- as.numeric(dat$Year)
+dat <- dat[order(dat$Year), ]
+#-----
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 dat <- read.csv(data_file, check.names = FALSE, stringsAsFactors = FALSE,
