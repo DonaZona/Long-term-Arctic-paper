@@ -32,7 +32,7 @@ jobs:
         env:
           NEE_DATA_FILE: TOT_MET_FLX_v2026_11_13_f.csv
         run: |
-          Rscript R_script_Fig3_NEE_driver_correlations.R
+          Rscript R_script_Fig3_NEE_driver_correlations_DZ.R
 
       - name: Upload Figure 3 outputs
         if: always()
