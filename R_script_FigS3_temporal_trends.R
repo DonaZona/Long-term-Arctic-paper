@@ -3,21 +3,21 @@
 # to generate Fig. S3
 
 #below is to load into R studio----
-data_file <- "C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB/TOT_MET_FLX_v2026_11_13_f.csv"
-out_dir <- "C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB"
-
-dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-
-dat <- read.csv(data_file, check.names = FALSE, stringsAsFactors = FALSE,
-                na.strings = c("", "NA", "NaN"))
-dat$Year <- as.numeric(dat$Year)
-dat <- dat[order(dat$Year), ]
-
-format_p <- function(p) {
-  if (!is.finite(p)) return("NA")
-  if (p < 0.001) return("< 0.001")
-  sprintf("%.4f", p)
-}
+# data_file <- "C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB/TOT_MET_FLX_v2026_11_13_f.csv"
+# out_dir <- "C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB"
+# 
+# dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+# 
+# dat <- read.csv(data_file, check.names = FALSE, stringsAsFactors = FALSE,
+#                 na.strings = c("", "NA", "NaN"))
+# dat$Year <- as.numeric(dat$Year)
+# dat <- dat[order(dat$Year), ]
+# 
+# format_p <- function(p) {
+#   if (!is.finite(p)) return("NA")
+#   if (p < 0.001) return("< 0.001")
+#   sprintf("%.4f", p)
+# }
 
 #below is to load the file on Github----
 data_file <- Sys.getenv(
