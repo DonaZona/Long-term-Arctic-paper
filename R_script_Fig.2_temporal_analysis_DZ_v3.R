@@ -1,351 +1,294 @@
-# Script modified by DZ on 2026-11-16 for the NEE–environmental-driver analysis
-# to generate Fig. 2
+#script modified by DZ on 2026-11-24 for the Long term paper
+#temporal analysis
 
-# Yue–Pilon implementation:
-#   Theil–Sen detrending -> lag-1 autocorrelation of detrended residuals
-#   -> pre-whitening -> trend restoration -> Kendall test.
+# =============================================================================
+# Temporal trends in monthly NEE and environmental drivers, US-Brw (Utqiagvik)
+# Reproduces the statistics in the Fig. 2 table, Table 1 (all NEE months and
+# environmental variables) and the residual ACF figure (Fig. S5)
+#
+# Methods: OLS regression, Kendall rank correlation, Yue-Pilon trend-free
+# pre-whitened Mann-Kendall test (zyp), GLS with continuous-time AR(1) errors
+# (nlme), GAM with a smooth term for year (mgcv), lag-1 ACF of OLS residuals,
+# and Pearson correlation between NEE and its driver.
+#
+# Missing years are kept as gaps (NA on a continuous annual grid), so that
+# autocorrelation is only estimated between consecutive calendar years.
+# =============================================================================
 
-library(ggplot2)
+library(zyp)    # Yue-Pilon pre-whitening (Bronaugh and Werner, 2019)
+library(nlme)   # GLS with corCAR1 (Pinheiro et al.)
+library(mgcv)   # GAM (Wood, 2017)
 
-# Input and output paths. NEE_DATA_FILE can override the default CSV path.
-# Keep the file path as text here; read.csv() is called below after validation.
-default_data_file <- "C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB/TOT_MET_FLX_v2026_11_13_f.csv"
-data_file <- Sys.getenv("NEE_DATA_FILE", unset = default_data_file)
-data_file <- trimws(data_file)
-data_file <- gsub('^"|"$', "", data_file)
+data_dir <- "C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB"
+setwd(data_dir) 
+dat <- read.csv("C:/Users/local-admin/Desktop/Long_term_paper/Github_submission/SUBMITTED_GITHUB/TOT_MET_FLX_v2026_11_13_f.csv", check.names = FALSE)
 
-script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
-script_dir <- if (length(script_arg)) {
-  dirname(normalizePath(sub("^--file=", "", script_arg[1]), mustWork = FALSE))
-} else {
-  getwd()
-}
-out_dir <- Sys.getenv("NEE_OUTPUT_DIR", unset = file.path(script_dir, "Temporal_analysis_Fig.2"))
+# Active-layer depth (U1) from the previous year, indexed to the NEE year
+dat$U1_prev <- c(NA, head(dat$U1_Barrow_mean, -1))
 
-# If the configured file is unavailable, look for the same dataset beside the
-# script or in the current working directory (including versioned filenames).
-if (!file.exists(data_file)) {
-  search_dirs <- unique(c(script_dir, getwd()))
-  candidates <- unlist(lapply(search_dirs, function(d) {
-    if (!dir.exists(d)) return(character(0))
-    c(file.path(d, "TOT_MET_FLX_v2026_11_13_f(5).csv"),
-      list.files(d, pattern = "^TOT_MET_FLX_v2026_11_13_f.*\\.csv$",
-                 full.names = TRUE, ignore.case = TRUE))
-  }), use.names = FALSE)
-  candidates <- candidates[file.exists(candidates)]
-  if (length(candidates)) {
-    data_file <- candidates[1]
-    warning("Configured CSV path was not found; using: ", data_file)
-  } else if (interactive()) {
-    data_file <- file.choose()
-  } else {
-    stop(
-      "Input CSV not found at: ", data_file,
-      "\nCheck that the file exists, or set NEE_DATA_FILE to its full path."
-    )
-  }
-}
-
-dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-
-dat <- read.csv(data_file, check.names = FALSE, stringsAsFactors = FALSE,
-                na.strings = c("NA", "", "NaN"))
-if (!"Year" %in% names(dat)) stop("Required column 'Year' is missing.")
-dat$Year <- suppressWarnings(as.numeric(dat$Year))
-dat <- dat[is.finite(dat$Year), ]
-if (anyDuplicated(dat$Year)) stop("Year must contain one row per year.")
-dat <- dat[order(dat$Year), ]
-
-fmt_p <- function(p) {
-  if (!is.finite(p)) return("NA")
-  if (p < 0.001) return("<0.001")
-  sprintf("%.4f", p)
-}
-
-# Match Fig. 2: bold statistically significant p-value lines (p < 0.05).
-p_line <- function(label, p) {
-  list(text = ifelse(is.finite(p), paste0("  ", label, " p = ", fmt_p(p)),
-                     paste0("  ", label, " p = NA")),
-       font = ifelse(is.finite(p) && p < 0.05, 2, 1))
-}
-
-# Theil–Sen slope using the actual time axis.
-theil_sen_slope <- function(x, y) {
-  z <- is.finite(x) & is.finite(y)
-  x <- x[z]; y <- y[z]
-  if (length(y) < 2) return(NA_real_)
-  slopes <- unlist(lapply(seq_len(length(y) - 1), function(i) {
-    (y[(i + 1):length(y)] - y[i]) / (x[(i + 1):length(y)] - x[i])
-  }))
-  median(slopes, na.rm = TRUE)
-}
-
-# Yue–Pilon trend-free pre-whitened Mann–Kendall test.
-yue_pilon <- function(x, y) {
-  z <- data.frame(x = x, y = y)
-  z <- z[is.finite(z$x) & is.finite(z$y), ]
-  x <- z$x; y <- z$y
-  n <- length(y)
-  if (n < 5 || length(unique(y)) < 2) {
-    return(list(tau = NA_real_, p = NA_real_, rho = NA_real_, sen_slope = NA_real_))
-  }
-
-  sen <- theil_sen_slope(x, y)
-  detrended <- y - sen * x
-  rho <- suppressWarnings(cor(detrended[-n], detrended[-1], use = "complete.obs"))
-  if (!is.finite(rho)) rho <- 0
-  rho <- max(0, rho)
-
-  prewhitened_residual <- detrended[-1] - rho * detrended[-n]
-  blended <- prewhitened_residual + sen * x[-1]
-  kt <- suppressWarnings(cor.test(x[-1], blended, method = "kendall", exact = FALSE))
-
-  list(tau = unname(kt$estimate), p = kt$p.value,
-       rho = rho, sen_slope = sen)
-}
-
-trend_stats <- function(year, value) {
-  z <- data.frame(year = year, value = value)
-  z <- z[is.finite(z$year) & is.finite(z$value), ]
-  x <- z$year; y <- z$value
-  n <- length(y)
-  if (n < 3) {
-    return(data.frame(n = n, first_year = NA, last_year = NA,
-                      slope = NA, change_decade = NA, r2 = NA, ols_p = NA,
-                      kendall_tau = NA, kendall_p = NA, yue_tau = NA,
-                      yue_p = NA, yue_lag1_rho = NA, mean = NA, min = NA, max = NA))
-  }
-
-  ols <- lm(y ~ x)
-  ols_coef <- summary(ols)$coefficients
-  kt <- suppressWarnings(cor.test(x, y, method = "kendall", exact = FALSE))
-  yp <- yue_pilon(x, y)
-
-  data.frame(
-    n = n,
-    first_year = min(x),
-    last_year = max(x),
-    slope = unname(coef(ols)[2]),
-    change_decade = unname(coef(ols)[2]) * 10,
-    r2 = summary(ols)$r.squared,
-    ols_p = ols_coef[2, 4],
-    kendall_tau = unname(kt$estimate),
-    kendall_p = kt$p.value,
-    yue_tau = yp$tau,
-    yue_p = yp$p,
-    yue_lag1_rho = yp$rho,
-    mean = mean(y),
-    min = min(y),
-    max = max(y)
-  )
-}
-
-units_map <- c(
-  NEE_May = "g C-CO2 m^-2 month^-1", NEE_June = "g C-CO2 m^-2 month^-1",
-  NEE_July = "g C-CO2 m^-2 month^-1", NEE_Aug = "g C-CO2 m^-2 month^-1",
-  NEE_Sept = "g C-CO2 m^-2 month^-1", NEE_Oct = "g C-CO2 m^-2 month^-1",
-  SoilT_May = "deg C", SoilT_June = "deg C", SoilT_July = "deg C",
-  SoilT_Aug = "deg C", SoilT_Sept = "deg C", SoilT_Oct = "deg C",
-  melt_date_NOAA = "day of year", Snow_In_NOAA = "day of year",
-  Snow_free_NOAA = "day of year", `Snow Season Length_NOAA` = "days",
-  SWC_May = "%", SWC_June = "%", SWC_July = "%", SWC_Aug = "%",
-  SWC_Sept = "%", SWC_Oct = "%", SWC_JJA_median = "%",
-  GDD_JJA = "deg C days", GDD_June = "deg C days", GDD_July = "deg C days",
-  GDD_Aug = "deg C days", GDD_Sept = "deg C days",
-  U1_Barrow_mean = "cm below surface"
-)
-
-nee_cols <- c("NEE_May", "NEE_June", "NEE_July", "NEE_Aug", "NEE_Sept", "NEE_Oct")
-nee_labels <- c(NEE_May = "May NEE", NEE_June = "June NEE", NEE_July = "July NEE",
-                NEE_Aug = "August NEE", NEE_Sept = "September NEE", NEE_Oct = "October NEE")
-
-env_cols <- c("SoilT_May", "SoilT_June", "SoilT_July", "SoilT_Aug",
-              "SoilT_Sept", "SoilT_Oct",
-              "melt_date_NOAA", "Snow_In_NOAA", "Snow_free_NOAA",
-              "Snow Season Length_NOAA", "SWC_May", "SWC_June", "SWC_July",
-              "SWC_Aug", "SWC_Sept", "SWC_Oct", "SWC_JJA_median",
-              "GDD_JJA", "GDD_June", "GDD_July", "GDD_Aug", "GDD_Sept",
-              "U1_Barrow_mean")
-
-# Confirm that every requested column exists in the input dataset.
-required_cols <- unique(c("Year", nee_cols, env_cols))
-missing_cols <- setdiff(required_cols, names(dat))
-if (length(missing_cols) > 0) {
-  stop(
-    "The following required columns are missing from the dataset: ",
-    paste(missing_cols, collapse = ", ")
-  )
-}
-
-make_row <- function(type, label, col, scope) {
-  if (!col %in% names(dat)) {
-    stop("Column not found in dataset: ", col)
-  }
-
-  s <- trend_stats(dat$Year, dat[[col]])
-  cbind(data.frame(series_type = type, variable = label, source_column = col,
-                   temporal_scope = scope, units = unname(units_map[col])), s)
-}
-
-results <- do.call(rbind, c(
-  lapply(nee_cols, function(x) make_row("NEE", nee_labels[x], x, "available NEE record")),
-  lapply(env_cols, function(x) make_row("environmental variable", x, x,
-                                         "entire available environmental record"))
-))
-rownames(results) <- NULL
-results$ols_p_significant_0.05 <- results$ols_p < 0.05
-results$kendall_p_significant_0.05 <- results$kendall_p < 0.05
-results$yue_p_significant_0.05 <- results$yue_p < 0.05
-results$ols_p_display <- vapply(results$ols_p, fmt_p, character(1))
-results$kendall_p_display <- vapply(results$kendall_p, fmt_p, character(1))
-results$yue_p_display <- vapply(results$yue_p, fmt_p, character(1))
-
-write.csv(results,
-          file.path(out_dir, "NEE_and_environmental_temporal_trends_consistent_method.csv"),
-          row.names = FALSE, na = "")
-
-# Panel definitions. May active-layer depth is aligned to the following spring.
+# Month -> driver used in each Fig. 2 panel.
+# drv_plot  = series paired with NEE (lagged for ALD)
+# drv_trend = series tested for a temporal trend (full record)
 panels <- data.frame(
-  month = c("May", "June", "July", "August", "September", "October"),
-  nee = c("NEE_May", "NEE_June", "NEE_July", "NEE_Aug", "NEE_Sept", "NEE_Oct"),
-  driver = c("U1_Barrow_mean", "melt_date_NOAA", "melt_date_NOAA", "SWC_May", "SWC_May", "SWC_May"),
-  driver_label = c("Active-layer depth (previous year)", "Snowmelt date", "Snowmelt date",
-                   "May SWC", "May SWC", "May SWC"),
-  lagged = c(TRUE, FALSE, FALSE, FALSE, FALSE, FALSE), stringsAsFactors = FALSE
+  month     = c("May", "June", "July", "Aug", "Sept", "Oct"),
+  driver    = c("Active-layer depth (previous year)", "Snowmelt date", "Snowmelt date",
+                "May SWC", "May SWC", "May SWC"),
+  drv_plot  = c("U1_prev", "melt_date_NOAA", "melt_date_NOAA", "SWC_May", "SWC_May", "SWC_May"),
+  drv_trend = c("U1_Barrow_mean", "melt_date_NOAA", "melt_date_NOAA", "SWC_May", "SWC_May", "SWC_May"),
+  stringsAsFactors = FALSE
 )
 
-association_rows <- list()
-panel_rows <- list()
+alpha <- 0.05
 
-png(file.path(out_dir, "Fig.2_FINAL_reproduced.png"),
-    width = 5200, height = 8000, res = 300)
-layout(matrix(seq_len(nrow(panels) * 2), ncol = 2, byrow = TRUE),
-       widths = c(5.5, 1.25))
-par(oma = c(0, 0, 0, 0))
+# -----------------------------------------------------------------------------
+# Trend tests for one series. Years without data are kept as NA on a
+# continuous annual grid so lag-1 autocorrelation respects real year spacing.
+# -----------------------------------------------------------------------------
+trend_tests <- function(year, y) {
+  ok   <- !is.na(y)
+  grid <- seq(min(year[ok]), max(year[ok]))
+  yg   <- y[match(grid, year)]
+  df   <- data.frame(Year = grid, y = yg)[!is.na(yg), ]
 
+  # 1. OLS regression
+  ols <- lm(y ~ Year, data = df)
+
+  # 2. Kendall rank correlation between value and year (equivalent to the
+  #    Mann-Kendall test). Exact p-value when there are no ties; normal
+  #    approximation (with a warning, suppressed here) when there are ties.
+  ken <- suppressWarnings(cor.test(df$Year, df$y, method = "kendall"))
+
+  # 3. Yue-Pilon trend-free pre-whitening + Mann-Kendall (zyp defaults)
+  yp <- zyp.yuepilon(yg, grid)
+
+  # 4. GLS with continuous-time AR(1) errors (handles missing years)
+  gls_fit <- gls(y ~ Year, data = df, correlation = corCAR1(form = ~ Year), method = "ML")
+
+  # 5. Lag-1 autocorrelation of OLS residuals on the annual grid
+  r <- rep(NA, length(grid)); r[match(df$Year, grid)] <- resid(ols)
+  acf1 <- acf(r, lag.max = 1, plot = FALSE, na.action = na.pass)$acf[2]
+
+  list(df = df, grid = grid, resid = r,
+       n          = nrow(df),
+       ols_slope  = unname(coef(ols)[2]),
+       ols_p      = summary(ols)$coefficients["Year", "Pr(>|t|)"],
+       kendall_tau = unname(ken$estimate),
+       kendall_p  = ken$p.value,
+       yuepilon_tau = unname(yp["tau"]),
+       sen_slope  = unname(yp["trend"]),
+       yuepilon_p = unname(yp["sig"]),
+       gls_p      = summary(gls_fit)$tTable["Year", "p-value"],
+       acf1       = acf1,
+       acf_bound  = qnorm(1 - alpha / 2) / sqrt(nrow(df)))
+}
+
+# -----------------------------------------------------------------------------
+# Non-linear trend: GAM with a smooth term for year, compared with a linear fit
+# -----------------------------------------------------------------------------
+gam_test <- function(df) {
+  lin <- gam(y ~ Year, data = df, method = "REML")
+  sm  <- gam(y ~ s(Year, k = 6), data = df, method = "REML")
+  list(fit = sm,
+       show  = NA,
+       edf   = sum(sm$edf) - 1,                         # edf of the smooth (1 = linear)
+       p     = summary(sm)$s.table[1, "p-value"],
+       dAIC  = AIC(lin) - AIC(sm))                      # > 2: GAM fits clearly better
+}
+
+# -----------------------------------------------------------------------------
+# Run for each panel
+# -----------------------------------------------------------------------------
+results <- list(); acf_store <- list()
 for (i in seq_len(nrow(panels))) {
-  p <- panels[i, ]
-  nee <- dat[, c("Year", p$nee)]
-  names(nee) <- c("Year", "NEE")
-  nee <- nee[is.finite(nee$NEE), ]
+  p   <- panels[i, ]
+  nee <- paste0("NEE_", p$month)
 
-  driver <- dat[, c("Year", p$driver)]
-  names(driver) <- c("Year", "driver")
-  if (p$lagged) driver$Year <- driver$Year + 1
+  tn <- trend_tests(dat$Year, dat[[nee]])
+  gm <- gam_test(tn$df)
+  td <- trend_tests(dat$Year, dat[[p$drv_trend]])
 
-  pair <- merge(nee, driver, by = "Year")
-  pair <- pair[is.finite(pair$NEE) & is.finite(pair$driver), ]
+  pair <- na.omit(dat[, c(nee, p$drv_plot)])
+  pr   <- cor.test(pair[[1]], pair[[2]], method = "pearson")
 
-  # Guard correlation and scaling against too few pairs or zero variance.
-  assoc <- if (nrow(pair) >= 3 && sd(pair$NEE) > 0 && sd(pair$driver) > 0) {
-    suppressWarnings(cor.test(pair$NEE, pair$driver, method = "pearson"))
-  } else {
-    list(estimate = NA_real_, p.value = NA_real_)
-  }
-  association_rows[[i]] <- data.frame(
-    month = p$month, NEE = p$nee, driver = p$driver_label,
-    lagged_driver = p$lagged, n_paired = nrow(pair),
-    pearson_r = unname(assoc$estimate), pearson_p = assoc$p.value,
-    r_squared = unname(assoc$estimate)^2
+  show_gam <- gm$edf > 1.5 && gm$dAIC > 2 && gm$p < alpha
+
+  results[[i]] <- data.frame(
+    Month            = p$month,
+    Driver           = p$driver,
+    n                = tn$n,
+    OLS_slope        = tn$ols_slope,
+    OLS_p            = tn$ols_p,
+    Kendall_p        = tn$kendall_p,
+    Sen_slope        = tn$sen_slope,
+    YuePilon_p       = tn$yuepilon_p,
+    GLS_AR1_p        = tn$gls_p,
+    GAM_p            = if (show_gam) gm$p else NA,
+    GAM_edf          = if (show_gam) gm$edf else NA,
+    Resid_lag1_r     = tn$acf1,
+    Resid_exceeds_CI = abs(tn$acf1) > tn$acf_bound,
+    Drv_OLS_p        = td$ols_p,
+    Drv_Kendall_p    = td$kendall_p,
+    Drv_YuePilon_p   = td$yuepilon_p,
+    Drv_GLS_AR1_p    = td$gls_p,
+    Pearson_r        = unname(pr$estimate),
+    Pearson_p        = pr$p.value,
+    R2               = unname(pr$estimate)^2,
+    n_pair           = nrow(pair)
   )
+  acf_store[[p$month]] <- tn
+}
+tab <- do.call(rbind, results)
+write.csv(tab, "Table_NEE_trends.csv", row.names = FALSE)
+print(format(tab, digits = 3), row.names = FALSE)
 
-  nee_trend <- trend_stats(pair$Year, pair$NEE)
-  full_driver <- trend_stats(dat$Year, dat[[p$driver]])
-
-  panel_rows[[i]] <- data.frame(
-    month = p$month,
-    NEE_variable = p$nee,
-    driver = p$driver_label,
-    driver_source_column = p$driver,
-    driver_trend_scope = "entire available environmental record",
-    NEE_n = nee_trend$n,
-    NEE_OLS_p = nee_trend$ols_p,
-    NEE_Kendall_p = nee_trend$kendall_p,
-    NEE_Yue_Pilon_p = nee_trend$yue_p,
-    driver_n_full_record = full_driver$n,
-    driver_OLS_p_full_record = full_driver$ols_p,
-    driver_Kendall_p_full_record = full_driver$kendall_p,
-    driver_Yue_Pilon_p_full_record = full_driver$yue_p,
-    paired_n = nrow(pair),
-    Pearson_r = unname(assoc$estimate),
-    Pearson_p = assoc$p.value,
-    R_squared = unname(assoc$estimate)^2
-  )
-
-  safe_z <- function(x) {
-    s <- sd(x, na.rm = TRUE)
-    if (!length(x) || !is.finite(s) || s == 0) rep(0, length(x))
-    else as.numeric((x - mean(x, na.rm = TRUE)) / s)
-  }
-  nee_z <- safe_z(pair$NEE)
-  drv_z <- safe_z(pair$driver)
-  yr <- pair$Year
-  yr_range <- range(dat$Year, na.rm = TRUE)
-
-  par(mar = c(3.5, 5.5, 2.5, 1))
-  if (length(yr) == 0) {
-    plot.new()
-    title(main = paste0(p$month, ": NEE and ", p$driver_label))
-    text(0.5, 0.5, "No paired observations")
-  } else {
-  plot(yr, nee_z, type = "o", pch = 16, lwd = 2, col = "#1f77b4",
-       xlim = yr_range + c(-0.5, 0.5), ylim = range(c(nee_z, drv_z), na.rm = TRUE) + c(-0.3, 0.3),
-       xlab = if (i == nrow(panels)) "Year" else "", ylab = "Standardized value\n(z-score)",
-       main = paste0(p$month, ": NEE and ", p$driver_label), cex.main = 1.25,
-       cex.lab = 1.1, cex.axis = 1.0)
-  lines(yr, drv_z, type = "o", pch = 16, lwd = 2, col = "#ff7f0e")
-  abline(h = 0, col = "grey70")
-  abline(lm(nee_z ~ yr), col = "#d62728", lty = 2, lwd = 1.5)
-
-  # Project the full-record driver trend onto the paired-year display scale.
-  # Keep prediction and scaling vectors aligned to the paired years.
-  driver_ok <- is.finite(dat$Year) & is.finite(dat[[p$driver]])
-  if (sum(driver_ok) >= 2 && length(yr) >= 2 && sd(pair$driver) > 0) {
-    driver_full_df <- data.frame(Year = dat$Year[driver_ok],
-                                 driver = dat[[p$driver]][driver_ok])
-    full_fit <- lm(driver ~ Year, data = driver_full_df)
-    driver_years <- dat$Year[driver_ok]
-    pred_raw <- as.numeric(predict(full_fit, newdata = data.frame(Year = driver_years)))
-    pred_z <- (pred_raw - mean(pair$driver)) / sd(pair$driver)
-    # For May, active-layer depth is aligned to the following year, matching
-    # the orange driver series and the paired NEE observations.
-    plot_driver_years <- driver_years + if (isTRUE(p$lagged)) 1 else 0
-    lines(plot_driver_years, pred_z, col = "#2ca02c", lty = 2, lwd = 1.5)
-  }
-  legend("topleft", legend = c("NEE", p$driver_label),
-         col = c("#1f77b4", "#ff7f0e"), lwd = 2, pch = 16,
-         bty = "n", cex = 0.85)
-
-  }
-
-  # Right-hand statistics panel.
-  par(mar = c(3.5, 0.2, 2.5, 0.2))
-  plot.new()
-  plot.window(xlim = c(0, 1), ylim = c(0, 1))
-  stat_lines <- list(
-    list("NEE trend:", 1),
-    p_line("  OLS", nee_trend$ols_p),
-    p_line("  Kendall", nee_trend$kendall_p),
-    p_line("  Yue–Pilon", nee_trend$yue_p),
-    list("Driver trend (full record):", 1),
-    p_line("  OLS", full_driver$ols_p),
-    p_line("  Kendall", full_driver$kendall_p),
-    p_line("  Yue–Pilon", full_driver$yue_p),
-    list("NEE–driver association (paired years):", 1),
-    list(sprintf("  Pearson r = %.2f; p = %s", assoc$estimate, fmt_p(assoc$p.value)),
-         ifelse(is.finite(assoc$p.value) && assoc$p.value < 0.05, 2, 1)),
-    list(sprintf("  R² = %.2f; n = %d", assoc$estimate^2, nrow(pair)), 1)
-  )
-  yy <- seq(0.95, 0.10, length.out = length(stat_lines))
-  for (j in seq_along(stat_lines)) {
-    text(0.01, yy[j], stat_lines[[j]]$text, adj = c(0, 0.5),
-         cex = 0.84, font = stat_lines[[j]]$font)
-  }
-  box()
+# -----------------------------------------------------------------------------
+# Fig. SX: ACF of OLS residuals for each month (gaps kept)
+# -----------------------------------------------------------------------------
+pdf("FigSX_ACF_OLS_residuals.pdf", width = 9, height = 6)
+par(mfrow = c(2, 3), mar = c(4, 4, 3, 1))
+for (m in names(acf_store)) {
+  a <- acf_store[[m]]
+  acf(a$resid, lag.max = 8, na.action = na.pass, main = paste("NEE", m),
+      xlab = "Lag (years)", ylab = "ACF of OLS residuals")
 }
 dev.off()
 
-associations <- do.call(rbind, association_rows)
+# =============================================================================
+# Table 1: temporal trends in monthly NEE and all environmental variables
+# Each variable is tested over its own full record (years without data kept
+# as gaps). A row is flagged "robust" when OLS, Kendall, Yue-Pilon and GLS
+# all give p < 0.05; these rows are shown in bold in Table 1.
+# =============================================================================
+table1_vars <- data.frame(
+  column = c("NEE_May", "NEE_June", "NEE_July", "NEE_Aug", "NEE_Sept", "NEE_Oct",
+             "SoilT_June", "SoilT_July", "SoilT_Aug", "SoilT_Sept",
+             "melt_date_NOAA", "Snow_In_NOAA", "Snow_free_NOAA",
+             "SWC_May", "SWC_June", "SWC_July", "SWC_Aug", "SWC_Sept", "SWC_Oct",
+             "GDD_June", "GDD_July", "GDD_Aug", "GDD_Sept", "U1_Barrow_mean"),
+  label  = c("May NEE", "June NEE", "July NEE", "Aug NEE", "Sept NEE", "Oct NEE",
+             "SoilT_June", "SoilT_July", "SoilT_Aug", "SoilT_Sept",
+             "Snow melt", "Snow in", "Snow free",
+             "SWC_May", "SWC_June", "SWC_July", "SWC_Aug", "SWC_Sept", "SWC_Oct",
+             "GDD_June", "GDD_July", "GDD_Aug", "GDD_Sept", "Thaw depth"),
+  units  = c(rep("g C-CO2 m-2 month-1", 6), rep("deg C", 4), rep("day of year", 3),
+             rep("%", 6), rep("deg C days", 4), "cm below surface"),
+  stringsAsFactors = FALSE
+)
+
+t1 <- lapply(seq_len(nrow(table1_vars)), function(i) {
+  v  <- table1_vars$column[i]
+  tt <- trend_tests(dat$Year, dat[[v]])
+  gm <- gam_test(tt$df)
+  show_gam <- gm$edf > 1.5 && gm$dAIC > 2 && gm$p < alpha
+  data.frame(
+    Variable          = table1_vars$label[i],
+    Units             = table1_vars$units[i],
+    N                 = tt$n,
+    Start             = min(tt$df$Year),
+    End               = max(tt$df$Year),
+    OLS_slope_yr      = tt$ols_slope,
+    OLS_slope_decade  = tt$ols_slope * 10,
+    OLS_p             = tt$ols_p,
+    Kendall_tau       = tt$kendall_tau,
+    Kendall_p         = tt$kendall_p,
+    YuePilon_tau      = tt$yuepilon_tau,
+    YuePilon_p        = tt$yuepilon_p,
+    GLS_AR1_p         = tt$gls_p,
+    GAM_p             = if (show_gam) gm$p else NA,
+    GAM_edf           = if (show_gam) gm$edf else NA,
+    Resid_lag1_r      = tt$acf1,
+    Resid_exceeds_CI  = abs(tt$acf1) > tt$acf_bound,
+    Robust            = all(c(tt$ols_p, tt$kendall_p, tt$yuepilon_p, tt$gls_p) < alpha)
+  )
+})
+table1 <- do.call(rbind, t1)
+write.csv(table1, "Table_1_trends.csv", row.names = FALSE)
+print(format(table1, digits = 3), row.names = FALSE)
+
+# =============================================================================
+# Fig. 2: monthly NEE and its strongest temporally valid driver (z-scores)
+#   - NEE z-scored over its own record; driver z-scored over its full record
+#     and plotted at NEE years
+#   - dashed lines: OLS trends (NEE: red; driver over full record: green)
+#   - purple line + band: GAM fit +/- 95% CI, drawn only where the GAM shows
+#     significant non-linear change (edf > 1.5, dAIC > 2, p < 0.05)
+# Output: Fig_2.tiff (600 dpi, LZW) and Fig_2.pdf
+# =============================================================================
+zscore <- function(x) (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+
+col_nee <- "#1f77b4"; col_drv <- "#ff7f0e"; col_nt <- "#d62728"
+col_dt  <- "#2ca02c"; col_gam <- "#7b3fa0"
+fig2_panels <- data.frame(
+  month = c("May", "June", "July", "Aug", "Sept", "Oct"),
+  title = c("(a) May", "(b) June", "(c) July", "(d) August", "(e) September", "(f) October"),
+  driver_label = c("Active-layer depth (previous year)", "Snowmelt date", "Snowmelt date",
+                   "May soil water content", "May soil water content", "May soil water content"),
+  driver = c("U1_prev", "melt_date_NOAA", "melt_date_NOAA", "SWC_May", "SWC_May", "SWC_May"),
+  stringsAsFactors = FALSE
+)
+
+draw_fig2 <- function() {
+  layout(rbind(c(7, 7), c(1, 2), c(3, 4), c(5, 6)), heights = c(0.7, 3, 3, 3))
+  par(mar = c(4.2, 5.0, 2.6, 1.2), mgp = c(3.1, 0.8, 0), cex.axis = 1.15, cex.lab = 1.2,
+      las = 1, tcl = -0.4, lwd = 1.5)
+  for (i in seq_len(nrow(fig2_panels))) {
+    p   <- fig2_panels[i, ]
+    nee <- paste0("NEE_", p$month)
+
+    nd <- na.omit(data.frame(Year = dat$Year, y = dat[[nee]]))
+    nd$z <- zscore(nd$y)
+    dd <- na.omit(data.frame(Year = dat$Year, x = dat[[p$driver]]))
+    dd$z <- zscore(dd$x)
+    dsub <- dd[dd$Year %in% nd$Year, ]
+
+    plot(NA, xlim = c(2000, 2025), ylim = c(-3.4, 2.9), xlab = if (i >= 5) "Year" else "",
+         ylab = if (i %% 2 == 1) "Standardized value (z-score)" else "", bty = "l", xaxt = "n")
+    axis(1, at = seq(2000, 2025, 5))
+    abline(v = seq(2000, 2025, 5), h = -3:2, col = "grey90", lwd = 1)
+    abline(h = 0, col = "grey60", lwd = 1.5)
+
+    # GAM band and fit (z-scored NEE) where non-linear change is significant
+    gm <- gam_test(data.frame(Year = nd$Year, y = nd$z))
+    show_gam <- gm$edf > 1.5 && gm$dAIC > 2 && gm$p < alpha
+    if (show_gam) {
+      yr <- seq(min(nd$Year), max(nd$Year), by = 0.25)
+      pr <- predict(gm$fit, newdata = data.frame(Year = yr), se.fit = TRUE)
+      polygon(c(yr, rev(yr)), c(pr$fit - 1.96 * pr$se.fit, rev(pr$fit + 1.96 * pr$se.fit)),
+              col = adjustcolor(col_gam, 0.15), border = NA)
+    }
+
+    # driver
+    lines(dsub$Year, dsub$z, col = adjustcolor(col_drv, 0.6), lwd = 2)
+    points(dsub$Year, dsub$z, pch = 16, col = col_drv, cex = 1.3)
+    dfit <- lm(z ~ Year, dd)
+    segments(min(dd$Year), predict(dfit, data.frame(Year = min(dd$Year))),
+             max(dd$Year), predict(dfit, data.frame(Year = max(dd$Year))), col = col_dt, lwd = 3.4, lty = 2)
+
+    # NEE
+    lines(nd$Year, nd$z, col = adjustcolor(col_nee, 0.6), lwd = 2)
+    points(nd$Year, nd$z, pch = 16, col = col_nee, cex = 1.3)
+    nfit <- lm(z ~ Year, nd)
+    segments(min(nd$Year), predict(nfit, data.frame(Year = min(nd$Year))),
+             max(nd$Year), predict(nfit, data.frame(Year = max(nd$Year))), col = col_nt, lwd = 3.4, lty = 2)
+    if (show_gam) lines(yr, pr$fit, col = col_gam, lwd = 3.6)
+
+    mtext(p$title, side = 3, adj = 0, line = 0.6, font = 2, cex = 1.15)
+    mtext(paste("Driver:", p$driver_label), side = 3, adj = 1, line = 0.6, font = 2, cex = 0.9, col = col_drv)
+  }
+  # legend panel
+  par(mar = c(0, 0, 0, 0)); plot.new()
+  legend("center", ncol = 3, bty = "n", cex = 1.25, seg.len = 2.5, x.intersp = 0.6, text.width = NA,
+         legend = expression("NEE", "Driver", "NEE trend (OLS)", "Driver trend (OLS, full record)",
+                             "NEE GAM" %+-% "95% CI (significant non-linear change)"),
+         col = c(col_nee, col_drv, col_nt, col_dt, col_gam), pch = c(16, 16, NA, NA, NA),
+         lty = c(1, 1, 2, 2, 1), lwd = c(2, 2, 3.4, 3.4, 3.6))
+}
+
+tiff("Fig_2.tiff", width = 17, height = 16, units = "in", res = 600, compression = "lzw", type = "cairo", pointsize = 20)
+draw_fig2(); dev.off()
+pdf("Fig_2.pdf", width = 17, height = 16, pointsize = 20)
+draw_fig2(); dev.off()
+
 write.csv(associations,
           file.path(out_dir, "NEE_driver_paired_associations_Fig.2.csv"),
           row.names = FALSE, na = "")
