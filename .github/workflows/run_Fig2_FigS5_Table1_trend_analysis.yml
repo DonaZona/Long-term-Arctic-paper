@@ -27,7 +27,7 @@ jobs:
       - name: Save outputs
         uses: actions/upload-artifact@v4
         with:
-          name: fig2-figS3-table1-outputs
+          name: fig2-figS5-table1-outputs
           path: |
             *.csv
             *.tiff
