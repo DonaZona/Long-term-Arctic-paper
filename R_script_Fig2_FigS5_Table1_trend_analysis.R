@@ -148,9 +148,9 @@ write.csv(tab, "Table_NEE_trends.csv", row.names = FALSE)
 print(format(tab, digits = 3), row.names = FALSE)
 
 # -----------------------------------------------------------------------------
-# Fig. SX: ACF of OLS residuals for each month (gaps kept)
+# Fig. S5: ACF of OLS residuals for each month (gaps kept)
 # -----------------------------------------------------------------------------
-pdf("FigSX_ACF_OLS_residuals.pdf", width = 9, height = 6)
+pdf("FigS5_ACF_OLS_residuals.pdf", width = 9, height = 6)
 par(mfrow = c(2, 3), mar = c(4, 4, 3, 1))
 for (m in names(acf_store)) {
   a <- acf_store[[m]]
