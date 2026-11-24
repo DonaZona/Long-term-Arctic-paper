@@ -1,4 +1,3 @@
-
 # Long-term CO₂ exchange at US-Brw (Utqiaġvik, Alaska), 2002–2024
 
 Data and R code to reproduce the analyses, tables and figures of:
@@ -9,12 +8,9 @@ Oechel et al., in review
 | File | Description |
 |---|---|
 | `TOT_MET_FLX_v2026_11_13_f.csv` | Annual values of monthly NEE and environmental variables, 2000–2024 (NA = no data) |
-| `R_script_Fig2_FigS5_Table1_trend_analysis.R` | Temporal trend analyses (Table 1, Fig. 2, Fig. S3) |
+| `R_script_Fig2_FigS5_Table1_trend_analysis.R` | Temporal trend analyses (Table 1, Fig. 2, Fig. S5) |
 | `R_script_Fig3_NEE_driver_correlations_DZ.R` | NEE–driver correlations (Fig. 3) |
 | `R_script_Fig4_snowmelt_SWCMay.R` | Snowmelt date vs May soil water content (Fig. 4) |
-
-Outputs: `Fig_4_snowmelt_SWCMay.tiff`, `Fig_4_snowmelt_SWCMay.pdf`,
-`Fig_4_snowmelt_SWCMay_stats.csv`
 | `R_script_FigS4_correlogram_DZ.R` | Correlogram (Fig. S4) |
 
 ### Data columns
@@ -48,34 +44,41 @@ install.packages(c("zyp", "nlme", "mgcv"))
    ```
 3. Run any script, for example:
    ```r
-   source("R_script_Fig2_FigS3_Table1_trend_analysis.R")
+   source("R_script_Fig2_FigS5_Table1_trend_analysis.R")
    ```
 
 Each script runs on its own and writes its outputs to the same folder.
 
 ## Scripts
 
-### Table 1, Fig. 2 and Fig. S3: `R_script_Fig2_FigS3_Table1_trend_analysis.R`
+### Table 1, Fig. 2 and Fig. S5: `R_script_Fig2_FigS5_Table1_trend_analysis.R`
 Tests temporal trends in monthly NEE and environmental variables with ordinary
 least-squares (OLS) regression, Kendall's rank correlation test, the Yue–Pilon
 pre-whitened Mann–Kendall test (`zyp`) and generalized least-squares regression with
 continuous-time first-order autoregressive errors (GLS-AR(1); `nlme`). Non-linear
 change is tested with generalized additive models (`mgcv`; k = 6, REML) and reported
 where edf > 1.5, ΔAIC > 2 relative to a linear model, and p < 0.05. Years without
-data are retained as gaps. Also checks residual autocorrelation (ACF of OLS residuals).
+data are retained as gaps. Residual autocorrelation is assessed with the ACF of the
+OLS residuals (Fig. S5).
 
 Outputs: `Table_1_trends.csv`, `Table_NEE_trends.csv`, `Fig_2.tiff`, `Fig_2.pdf`,
-and the residual autocorrelation figure.
+and the residual autocorrelation figure (Fig. S5).
 
 ### Fig. 3: `R_script_Fig3_NEE_driver_correlations_DZ.R`
 Pearson correlations between monthly NEE and environmental drivers.
+
+### Fig. 4: `R_script_Fig4_snowmelt_SWCMay.R`
+Correlation between snowmelt date and May soil water content, for observed values and
+for anomalies after removing each variable's linear trend, with sensitivity tests
+excluding 2016 and 2015–2016. Uses base R only.
+
+Outputs: `Fig_4_snowmelt_SWCMay.tiff`, `Fig_4_snowmelt_SWCMay.pdf`,
+`Fig_4_snowmelt_SWCMay_stats.csv`
 
 ### Fig. S4: `R_script_FigS4_correlogram_DZ.R`
 Correlogram of NEE and environmental variables.
 
 Significance threshold for all analyses: p < 0.05.
-
-### Fig. 4: `R_script_Fig4_snowmelt_SWCMay.R`
 Correlation between snowmelt date and May soil water content, for observed values and
 for anomalies after removing each variable's linear trend, with sensitivity tests
 excluding 2016 and 2015–2016.
