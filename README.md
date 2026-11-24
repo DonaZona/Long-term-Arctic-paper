@@ -9,8 +9,12 @@ Oechel et al., in review
 | File | Description |
 |---|---|
 | `TOT_MET_FLX_v2026_11_13_f.csv` | Annual values of monthly NEE and environmental variables, 2000–2024 (NA = no data) |
-| `R_script_Fig2_FigS3_Table1_trend_analysis.R` | Temporal trend analyses (Table 1, Fig. 2, Fig. S3) |
+| `R_script_Fig2_FigS5_Table1_trend_analysis.R` | Temporal trend analyses (Table 1, Fig. 2, Fig. S3) |
 | `R_script_Fig3_NEE_driver_correlations_DZ.R` | NEE–driver correlations (Fig. 3) |
+| `R_script_Fig4_snowmelt_SWCMay.R` | Snowmelt date vs May soil water content (Fig. 4) |
+
+Outputs: `Fig_4_snowmelt_SWCMay.tiff`, `Fig_4_snowmelt_SWCMay.pdf`,
+`Fig_4_snowmelt_SWCMay_stats.csv`
 | `R_script_FigS4_correlogram_DZ.R` | Correlogram (Fig. S4) |
 
 ### Data columns
@@ -70,3 +74,11 @@ Pearson correlations between monthly NEE and environmental drivers.
 Correlogram of NEE and environmental variables.
 
 Significance threshold for all analyses: p < 0.05.
+
+### Fig. 4: `R_script_Fig4_snowmelt_SWCMay.R`
+Correlation between snowmelt date and May soil water content, for observed values and
+for anomalies after removing each variable's linear trend, with sensitivity tests
+excluding 2016 and 2015–2016.
+
+Outputs: `Fig_4_snowmelt_SWCMay.tiff`, `Fig_4_snowmelt_SWCMay.pdf`,
+`Fig_4_snowmelt_SWCMay_stats.csv`
