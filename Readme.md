@@ -1,0 +1,60 @@
+ Long-term CO₂ exchange at US-Brw (Utqiaġvik, Alaska), 2002–2024
+
+Data and R code to reproduce the analyses, tables and figures of:
+Oechel et al., in review- Long term 
+
+## Files
+
+| File | Description |
+|---|---|
+| `TOT_MET_FLX_v2026_11_13_f.csv` | Annual values of monthly NEE and environmental variables, 2000–2024 (NA = no data) |
+| `R_script_Fig2_FigS3_Table1_trend_analysis.R` | Temporal trend analyses: Table 1, Fig. 2, Fig. S3 and the residual autocorrelation figure (Fig. S5) |
+| `R_script_Fig3_NEE_driver_correlations_DZ.R` | NEE–driver correlations (Fig. 3) |
+| `R_script_FigS4_correlogram_DZ.R` | Correlogram (Fig. S4) |
+
+### Data columns
+
+| Column(s) | Description | Units |
+|---|---|---|
+| `Year` | Year | – |
+| `NEE_May` … `NEE_Oct` | Monthly cumulative net ecosystem exchange (negative = net CO₂ uptake) | g C-CO₂ m⁻² month⁻¹ |
+| `SoilT_May` … `SoilT_Oct` | Monthly mean soil temperature | °C |
+| `SWC_May` … `SWC_Oct`, `SWC_JJA_median` | Monthly mean soil water content | % |
+| `GDD_June` … `GDD_Sept`, `GDD_JJA` | Growing degree days | °C d |
+| `melt_date_NOAA`, `Snow_In_NOAA` | Snowmelt date and snow onset date (NOAA) | day of year |
+| `Snow_free_NOAA`, `Snow Season Length_NOAA` | Snow-free period and snow season length (NOAA) | days |
+| `U1_Barrow_mean` | Mean active-layer (thaw) depth | cm |
+
+## Requirements
+
+R (≥ 4.0) and the packages `zyp`, `nlme` and `mgcv`:
+
+```r
+install.packages(c("zyp", "nlme", "mgcv"))
+```
+
+## How to run
+
+1. Download this repository (green **Code** button → **Download ZIP**) and unzip it.
+   Keep the scripts and the CSV file in the same folder.
+2. Open R or RStudio and set the working directory to that folder:
+   ```r
+   setwd("path/to/this/folder")
+   ```
+3. Run any script, for example:
+   ```r
+   source("R_script_Fig2_FigS3_Table1_trend_analysis.R")
+   ```
+
+Each script runs on its own and writes its tables and figures to the same folder.
+
+## Methods summary
+
+Temporal trends were tested with ordinary least-squares (OLS) regression, Kendall's
+rank correlation test, the Yue–Pilon pre-whitened Mann–Kendall test (`zyp`) and
+generalized least-squares regression with continuous-time first-order autoregressive
+errors (GLS-AR(1); `nlme`). Non-linear change was tested with generalized additive
+models (`mgcv`; k = 6, REML) and is reported where edf > 1.5, ΔAIC > 2 relative to a
+linear model, and p < 0.05. Years without data are retained as gaps. Significance
+threshold: p < 0.05.
+
